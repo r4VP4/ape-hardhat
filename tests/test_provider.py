@@ -8,7 +8,7 @@ from evm_trace import CallTreeNode, CallType, TraceFrame
 from hexbytes import HexBytes
 
 from ape_hardhat.exceptions import HardhatProviderError
-from ape_hardhat.providers import HARDHAT_CHAIN_ID, HARDHAT_CONFIG_FILE_NAME, HardhatProvider
+from ape_hardhat.provider import HARDHAT_CHAIN_ID, HARDHAT_CONFIG_FILE_NAME, HardhatProvider
 
 TEST_WALLET_ADDRESS = "0xD9b7fdb3FC0A0Aa3A507dCf0976bc23D49a9C7A3"
 
@@ -196,21 +196,17 @@ def test_send_transaction(contract_instance, owner):
 
 def test_contract_revert_no_message(owner, contract_instance):
     # The Contract raises empty revert when setting number to 5.
-    with pytest.raises(ContractLogicError) as err:
+    with pytest.raises(ContractLogicError, match="Transaction failed."):
         contract_instance.setNumber(5, sender=owner)
-
-    assert str(err.value) == "Transaction failed."
 
 
 def test_transaction_contract_as_sender(contract_instance, connected_provider):
     # Set balance so test wouldn't normally fail from lack of funds
     connected_provider.set_balance(contract_instance.address, "1000 ETH")
 
-    with pytest.raises(ContractLogicError) as err:
+    with pytest.raises(ContractLogicError, match="!authorized"):
         # Task failed successfully
         contract_instance.setNumber(10, sender=contract_instance)
-
-    assert str(err.value) == "!authorized"
 
 
 @pytest.mark.parametrize(
@@ -221,6 +217,24 @@ def test_set_account_balance(connected_provider, owner, convert, amount):
     assert owner.balance == convert("50 ETH", int)
 
 
+def test_set_code(connected_provider, contract_instance):
+    provider = connected_provider
+    code = provider.get_code(contract_instance.address)
+    assert type(code) == HexBytes
+    assert provider.set_code(contract_instance.address, "0x00") is True
+    assert provider.get_code(contract_instance.address) != code
+    assert provider.set_code(contract_instance.address, code) is True
+    assert provider.get_code(contract_instance.address) == code
+
+
 def test_return_value(connected_provider, contract_instance, owner):
     receipt = contract_instance.setAddress(owner.address, sender=owner)
     assert receipt.return_value == 123
+
+
+def test_get_receipt(connected_provider, contract_instance, owner):
+    receipt = contract_instance.setAddress(owner.address, sender=owner)
+    actual = connected_provider.get_receipt(receipt.txn_hash)
+    assert receipt.txn_hash == actual.txn_hash
+    assert actual.receiver == contract_instance.address
+    assert actual.sender == receipt.sender
